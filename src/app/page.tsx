@@ -1,65 +1,106 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useCallback, useMemo, useEffect } from "react";
+import dynamic from "next/dynamic";
+import ScrambleInput from "@/components/ScrambleInput";
+import SolveControls from "@/components/SolveControls";
+import SolutionList from "@/components/SolutionList";
+import InitProgress from "@/components/InitProgress";
+import { useSolver } from "@/hooks/useSolver";
+import { SolverType, Slot, CrossColor, PairInfo, MOVE_NAMES, CROSS_COLOR_ROTATION, SLOT_NAMES } from "@/solver/types";
+
+const CubeViewer = dynamic(() => import("@/components/CubeViewer"), { ssr: false });
 
 export default function Home() {
+  const { status, initProgress, solutions, solve, setSolutions, findPairs } = useSolver();
+
+  const [scramble, setScramble] = useState("");
+  const [solverType, setSolverType] = useState<SolverType>(SolverType.XCross);
+  const [crossColors, setCrossColors] = useState<CrossColor[]>([CrossColor.White]);
+  const [selectedSlots, setSelectedSlots] = useState<Slot[]>([Slot.FR, Slot.FL, Slot.BL, Slot.BR]);
+  const [maxExtraDepth, setMaxExtraDepth] = useState(2);
+  const [selectedSolutionIndex, setSelectedSolutionIndex] = useState<number | null>(null);
+  const [preservePair, setPreservePair] = useState(false);
+
+  // Detect pairs when scramble or cross colors change
+  const detectedPairs = useMemo(() => {
+    if (!scramble.trim() || status === "uninitialized" || status === "initializing") return [];
+    return findPairs(scramble, crossColors);
+  }, [scramble, crossColors, status, findPairs]);
+
+  // Auto-off preserve pair when no pairs detected
+  useEffect(() => {
+    if (detectedPairs.length === 0) setPreservePair(false);
+  }, [detectedPairs]);
+
+  const handleGenerate = useCallback(() => {
+    const { generateScramble } = require("@/lib/scramble");
+    setScramble(generateScramble());
+    setSolutions([]);
+    setSelectedSolutionIndex(null);
+  }, [setSolutions]);
+
+  const handleSolve = useCallback(() => {
+    if (!scramble.trim()) return;
+    setSelectedSolutionIndex(null);
+    const pairsToUse = preservePair && detectedPairs.length > 0 ? detectedPairs : undefined;
+    const slotsToSolve = pairsToUse
+      ? [...new Set(pairsToUse.map((p) => p.slot))]
+      : selectedSlots;
+    solve(scramble, solverType, slotsToSolve, maxExtraDepth, crossColors, pairsToUse);
+  }, [scramble, solverType, selectedSlots, maxExtraDepth, crossColors, solve, preservePair, detectedPairs]);
+
+  const selectedSolution = selectedSolutionIndex !== null ? solutions[selectedSolutionIndex] : null;
+  const solutionAlg = selectedSolution
+    ? [
+        selectedSolution.crossColor !== undefined ? CROSS_COLOR_ROTATION[selectedSolution.crossColor] : "",
+        selectedSolution.moves.map((m) => MOVE_NAMES[m]).join(" "),
+      ].filter(Boolean).join(" ")
+    : "";
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="flex-1 p-2 md:p-4 max-w-5xl mx-auto w-full">
+      {status === "initializing" && (
+        <InitProgress phase={initProgress.phase} percent={initProgress.percent} />
+      )}
+
+      <div className="font-mono font-bold text-sm mb-3">xcross solver</div>
+
+      <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] gap-4">
+        <div className="space-y-2">
+          <CubeViewer scramble={scramble} solution={solutionAlg} />
+          <ScrambleInput
+            value={scramble}
+            onChange={setScramble}
+            onGenerate={handleGenerate}
+            generating={false}
+          />
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="space-y-3">
+          <SolveControls
+            solverType={solverType}
+            onSolverTypeChange={setSolverType}
+            crossColors={crossColors}
+            onCrossColorsChange={setCrossColors}
+            selectedSlots={selectedSlots}
+            onSlotsChange={setSelectedSlots}
+            maxExtraDepth={maxExtraDepth}
+            onMaxExtraDepthChange={setMaxExtraDepth}
+            onSolve={handleSolve}
+            solving={status === "solving"}
+            ready={status === "ready" || status === "solving"}
+            preservePair={preservePair}
+            onPreservePairChange={setPreservePair}
+            detectedPairs={detectedPairs}
+          />
+          <SolutionList
+            solutions={solutions}
+            selectedIndex={selectedSolutionIndex}
+            onSelect={setSelectedSolutionIndex}
+          />
         </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
