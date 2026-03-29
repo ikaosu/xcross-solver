@@ -64,17 +64,20 @@ export default function Home() {
         <InitProgress phase={initProgress.phase} percent={initProgress.percent} />
       )}
 
-      <div className="font-mono font-bold text-sm mb-3">xcross solver</div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-mono font-bold text-sm">xcross solver</div>
+      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] gap-4">
-        <div className="space-y-2">
+      <ScrambleInput
+        value={scramble}
+        onChange={setScramble}
+        onGenerate={handleGenerate}
+        generating={false}
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] gap-4 mt-3">
+        <div>
           <CubeViewer scramble={scramble} solution={solutionAlg} />
-          <ScrambleInput
-            value={scramble}
-            onChange={setScramble}
-            onGenerate={handleGenerate}
-            generating={false}
-          />
         </div>
 
         <div className="space-y-3">

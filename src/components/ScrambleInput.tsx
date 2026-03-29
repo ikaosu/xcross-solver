@@ -32,9 +32,9 @@ export default function ScrambleInput({ value, onChange, onGenerate, generating 
         value={value}
         onChange={handleChange}
         placeholder="スクランブルを入力..."
-        rows={2}
-        className="w-full bg-card border border-card-border p-2 font-mono text-[13px]
-                   focus:outline-none focus:border-foreground resize-none"
+        rows={1}
+        className="w-full bg-card border border-card-border px-3 py-2 font-mono text-base md:text-lg
+                   focus:outline-none focus:border-foreground resize-none leading-relaxed"
       />
       <div className="flex items-center gap-3 mt-1 text-xs">
         <span
