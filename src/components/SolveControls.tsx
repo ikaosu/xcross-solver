@@ -1,6 +1,6 @@
 "use client";
 
-import { SolverType, Slot, SLOT_NAMES, CrossColor, PairInfo } from "@/solver/types";
+import { SolverType, Slot, SLOT_NAMES, CrossColor, PairInfo, getFBLOptions } from "@/solver/types";
 
 interface SolveControlsProps {
   solverType: SolverType;
@@ -17,11 +17,16 @@ interface SolveControlsProps {
   preservePair: boolean;
   onPreservePairChange: (v: boolean) => void;
   detectedPairs: PairInfo[];
+  fbLColors: CrossColor[];
+  onFBLColorsChange: (colors: CrossColor[]) => void;
+  useRw: boolean;
+  onUseRwChange: (v: boolean) => void;
 }
 
 const SOLVER_TYPES = [
   { value: SolverType.Cross, label: "Cross" },
   { value: SolverType.XCross, label: "XCross" },
+  { value: SolverType.FB, label: "FB" },
 ];
 
 const CROSS_COLORS: { value: CrossColor; label: string; cssColor: string }[] = [
@@ -51,6 +56,10 @@ export default function SolveControls({
   preservePair,
   onPreservePairChange,
   detectedPairs,
+  fbLColors,
+  onFBLColorsChange,
+  useRw,
+  onUseRwChange,
 }: SolveControlsProps) {
   const toggleColor = (color: CrossColor) => {
     if (crossColors.includes(color)) {
@@ -89,44 +98,101 @@ export default function SolveControls({
           ))}
         </div>
 
-        <div className="flex gap-0.5">
-          {CROSS_COLORS.map(({ value, label, cssColor }) => {
-            const selected = crossColors.includes(value);
-            return (
-              <span
-                key={value}
-                onClick={() => toggleColor(value)}
-                className="cursor-pointer inline-block w-5 h-5 leading-5 text-center text-[10px] font-bold"
-                style={{
-                  backgroundColor: selected ? cssColor : undefined,
-                  color: selected
-                    ? (value === CrossColor.White || value === CrossColor.Yellow ? "#000" : "#fff")
-                    : cssColor,
-                  outline: selected ? "2px solid #333" : undefined,
-                  outlineOffset: "-1px",
-                  opacity: selected ? 1 : 0.4,
-                }}
-              >{label}</span>
-            );
-          })}
+        <div className="flex gap-1 items-center">
+          {solverType === SolverType.FB && <span className="text-muted text-xs">D面</span>}
+          <div className="flex gap-0.5">
+            {CROSS_COLORS.map(({ value, label, cssColor }) => {
+              const selected = crossColors.includes(value);
+              return (
+                <span
+                  key={value}
+                  onClick={() => toggleColor(value)}
+                  className="cursor-pointer inline-block w-5 h-5 leading-5 text-center text-[10px] font-bold"
+                  style={{
+                    backgroundColor: selected ? cssColor : undefined,
+                    color: selected
+                      ? (value === CrossColor.White || value === CrossColor.Yellow ? "#000" : "#fff")
+                      : cssColor,
+                    outline: selected ? "2px solid #333" : undefined,
+                    outlineOffset: "-1px",
+                    opacity: selected ? 1 : 0.4,
+                  }}
+                >{label}</span>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {solverType === SolverType.XCross && (
+      {(solverType === SolverType.XCross || solverType === SolverType.FB) && (
         <div className="flex flex-wrap gap-x-5 gap-y-2 items-center">
-          <div className="flex gap-1 font-mono text-xs">
-            {ALL_SLOTS.map((slot) => (
-              <span
-                key={slot}
-                onClick={() => toggleSlot(slot)}
-                className={`px-1.5 py-0.5 cursor-pointer border ${
-                  selectedSlots.includes(slot)
-                    ? "border-foreground"
-                    : "border-card-border text-muted hover:text-foreground"
-                }`}
-              >{SLOT_NAMES[slot]}</span>
-            ))}
-          </div>
+          {solverType === SolverType.XCross && (
+            <div className="flex gap-1 font-mono text-xs">
+              {ALL_SLOTS.map((slot) => (
+                <span
+                  key={slot}
+                  onClick={() => toggleSlot(slot)}
+                  className={`px-1.5 py-0.5 cursor-pointer border ${
+                    selectedSlots.includes(slot)
+                      ? "border-foreground"
+                      : "border-card-border text-muted hover:text-foreground"
+                  }`}
+                >{SLOT_NAMES[slot]}</span>
+              ))}
+            </div>
+          )}
+
+          {solverType === SolverType.FB && (
+            <div className="flex gap-1 items-center">
+              <span className="text-muted text-xs">L面</span>
+              {(() => {
+                // Union of valid L options for all selected D colors
+                const allOptions = new Set<CrossColor>();
+                for (const dc of crossColors) {
+                  for (const lc of getFBLOptions(dc)) allOptions.add(lc);
+                }
+                return Array.from(allOptions).map((lc) => {
+                  const cc = CROSS_COLORS.find((c) => c.value === lc);
+                  if (!cc) return null;
+                  const selected = fbLColors.includes(lc);
+                  return (
+                    <span
+                      key={lc}
+                      onClick={() => {
+                        if (selected) {
+                          if (fbLColors.length > 1) onFBLColorsChange(fbLColors.filter((c) => c !== lc));
+                        } else {
+                          onFBLColorsChange([...fbLColors, lc]);
+                        }
+                      }}
+                      className="cursor-pointer inline-block w-5 h-5 leading-5 text-center text-[10px] font-bold"
+                      style={{
+                        backgroundColor: selected ? cc.cssColor : undefined,
+                        color: selected
+                          ? (lc === CrossColor.White || lc === CrossColor.Yellow ? "#000" : "#fff")
+                          : cc.cssColor,
+                        outline: selected ? "2px solid #333" : undefined,
+                        outlineOffset: "-1px",
+                        opacity: selected ? 1 : 0.4,
+                      }}
+                    >{cc.label}</span>
+                  );
+                });
+              })()}
+            </div>
+          )}
+
+          {solverType === SolverType.FB && (
+            <label
+              onClick={() => onUseRwChange(!useRw)}
+              className="flex items-center gap-1.5 cursor-pointer select-none text-xs"
+            >
+              <span className={`inline-block w-3.5 h-3.5 border text-center leading-3.5 text-[10px] ${
+                useRw ? "bg-foreground text-background border-foreground" : "border-card-border"
+              }`}>{useRw ? "\u2713" : ""}</span>
+              Rw表記
+            </label>
+          )}
 
           <div className="flex gap-1 text-xs items-center">
             <span className="text-muted">最短</span>

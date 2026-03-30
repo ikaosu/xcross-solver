@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Solution, SolverType, Slot, CrossColor, PairInfo } from "@/solver/types";
+import { Solution, SolverType, Slot, CrossColor, PairInfo, getFBLOptions } from "@/solver/types";
 import { SLOT_CORNER, SLOT_EDGE } from "@/solver/constants";
 
 export type SolverStatus = "uninitialized" | "initializing" | "ready" | "solving";
@@ -35,7 +35,7 @@ export function useSolver() {
       await delay(0);
       solver.initCrossPruningTable();
 
-      setInitProgress({ phase: "Generating xcross pruning tables...", percent: 50 });
+      setInitProgress({ phase: "Generating xcross pruning tables...", percent: 40 });
       await delay(0);
 
       const slots = [Slot.FR, Slot.FL, Slot.BL, Slot.BR];
@@ -43,11 +43,19 @@ export function useSolver() {
         const slot = slots[i];
         setInitProgress({
           phase: `Generating xcross tables (${i + 1}/4)...`,
-          percent: 50 + (i / 4) * 45,
+          percent: 40 + (i / 4) * 35,
         });
         await delay(0);
         solver.initXCrossPruningTables(SLOT_CORNER[slot], SLOT_EDGE[slot]);
       }
+
+      setInitProgress({ phase: "Generating FB move tables...", percent: 80 });
+      await delay(0);
+      solver.initFBTables();
+
+      setInitProgress({ phase: "Generating FB pruning table...", percent: 85 });
+      await delay(0);
+      solver.initFBPruningTable();
 
       setInitProgress({ phase: "Ready!", percent: 100 });
       setStatus("ready");
@@ -58,7 +66,7 @@ export function useSolver() {
   }, [status]);
 
   const solve = useCallback(
-    (scramble: string, solverType: SolverType, slots: Slot[], maxExtraDepth: number, crossColors: CrossColor[] = [CrossColor.White], pairInfos?: PairInfo[]) => {
+    (scramble: string, solverType: SolverType, slots: Slot[], maxExtraDepth: number, crossColors: CrossColor[] = [CrossColor.White], pairInfos?: PairInfo[], lColors?: CrossColor[]) => {
       if (!solverRef.current || status !== "ready") return;
       setStatus("solving");
       setSolutions([]);
@@ -66,9 +74,20 @@ export function useSolver() {
       setTimeout(() => {
         try {
           const allResults: Solution[] = [];
-          for (const color of crossColors) {
-            const results = solverRef.current!.solve(scramble, solverType, slots, maxExtraDepth, color, pairInfos);
-            allResults.push(...results);
+          if (solverType === SolverType.FB && lColors && lColors.length > 0) {
+            for (const dColor of crossColors) {
+              const validL = new Set(getFBLOptions(dColor));
+              for (const lColor of lColors) {
+                if (!validL.has(lColor)) continue;
+                const results = solverRef.current!.solve(scramble, solverType, slots, maxExtraDepth, dColor, undefined, lColor);
+                allResults.push(...results);
+              }
+            }
+          } else {
+            for (const color of crossColors) {
+              const results = solverRef.current!.solve(scramble, solverType, slots, maxExtraDepth, color, pairInfos);
+              allResults.push(...results);
+            }
           }
           setSolutions(allResults);
         } catch (e) {

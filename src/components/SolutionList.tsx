@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
-import { Solution, Slot, SLOT_NAMES, MOVE_NAMES, CROSS_COLOR_NAMES, CROSS_COLOR_ROTATION, CrossColor } from "@/solver/types";
+import { Solution, Slot, SLOT_NAMES, MOVE_NAMES, CROSS_COLOR_NAMES, CROSS_COLOR_ROTATION, CrossColor, SolverType } from "@/solver/types";
+import { convertToRw, simplifyRotation } from "@/lib/notation";
 
 const COLOR_CSS: Record<number, string> = {
   [CrossColor.White]:  "#ffffff",
@@ -18,9 +19,10 @@ interface SolutionListProps {
   solutions: Solution[];
   selectedIndex: number | null;
   onSelect: (index: number) => void;
+  useRw?: boolean;
 }
 
-export default function SolutionList({ solutions, selectedIndex, onSelect }: SolutionListProps) {
+export default function SolutionList({ solutions, selectedIndex, onSelect, useRw }: SolutionListProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("byLength");
 
   if (solutions.length === 0) {
@@ -42,20 +44,27 @@ export default function SolutionList({ solutions, selectedIndex, onSelect }: Sol
       </div>
 
       {viewMode === "bySlot" ? (
-        <GroupedBySlotView solutions={solutions} selectedIndex={selectedIndex} onSelect={onSelect} />
+        <GroupedBySlotView solutions={solutions} selectedIndex={selectedIndex} onSelect={onSelect} useRw={useRw} />
       ) : (
-        <SortedByLengthView solutions={solutions} selectedIndex={selectedIndex} onSelect={onSelect} />
+        <SortedByLengthView solutions={solutions} selectedIndex={selectedIndex} onSelect={onSelect} useRw={useRw} />
       )}
     </div>
   );
 }
 
-function GroupedBySlotView({ solutions, selectedIndex, onSelect }: SolutionListProps) {
-  // Group by slot
+function GroupedBySlotView({ solutions, selectedIndex, onSelect, useRw }: SolutionListProps) {
+  // Group by slot (xcross) or D+L color (FB)
   const grouped = new Map<string, { solutions: Solution[]; startIndex: number }>();
   let idx = 0;
   for (const sol of solutions) {
-    const key = sol.slot !== undefined ? SLOT_NAMES[sol.slot] : "Cross";
+    let key: string;
+    if (sol.dColor !== undefined && sol.lColor !== undefined) {
+      key = `D:${CROSS_COLOR_NAMES[sol.dColor]} L:${CROSS_COLOR_NAMES[sol.lColor]}`;
+    } else if (sol.slot !== undefined) {
+      key = SLOT_NAMES[sol.slot];
+    } else {
+      key = "Cross";
+    }
     if (!grouped.has(key)) {
       grouped.set(key, { solutions: [], startIndex: idx });
     }
@@ -79,6 +88,7 @@ function GroupedBySlotView({ solutions, selectedIndex, onSelect }: SolutionListP
                   sol={sol}
                   isSelected={globalIdx === selectedIndex}
                   onSelect={() => onSelect(globalIdx)}
+                  useRw={useRw}
                 />
               );
             })}
@@ -89,7 +99,7 @@ function GroupedBySlotView({ solutions, selectedIndex, onSelect }: SolutionListP
   );
 }
 
-function SortedByLengthView({ solutions, selectedIndex, onSelect }: SolutionListProps) {
+function SortedByLengthView({ solutions, selectedIndex, onSelect, useRw }: SolutionListProps) {
   // Build index-preserving sorted list
   const sorted = useMemo(() => {
     const indexed = solutions.map((sol, i) => ({ sol, originalIndex: i }));
@@ -102,7 +112,14 @@ function SortedByLengthView({ solutions, selectedIndex, onSelect }: SolutionList
   return (
     <div className="space-y-1 max-h-[500px] overflow-y-auto">
       {sorted.map(({ sol, originalIndex }) => {
-        const slotLabel = sol.slot !== undefined ? SLOT_NAMES[sol.slot] : "Cross";
+        let slotLabel: string;
+        if (sol.dColor !== undefined) {
+          slotLabel = "FB";
+        } else if (sol.slot !== undefined) {
+          slotLabel = SLOT_NAMES[sol.slot];
+        } else {
+          slotLabel = "Cross";
+        }
         return (
           <SolutionRow
             key={originalIndex}
@@ -111,6 +128,7 @@ function SortedByLengthView({ solutions, selectedIndex, onSelect }: SolutionList
             onSelect={() => onSelect(originalIndex)}
             slotLabel={slotLabel}
             isGlobalOptimal={sol.length === globalOptimal}
+            useRw={useRw}
           />
         );
       })}
@@ -124,16 +142,28 @@ function SolutionRow({
   onSelect,
   slotLabel,
   isGlobalOptimal,
+  useRw,
 }: {
   sol: Solution;
   isSelected: boolean;
   onSelect: () => void;
   slotLabel?: string;
   isGlobalOptimal?: boolean;
+  useRw?: boolean;
 }) {
-  const moveStr = sol.moves.map((m) => MOVE_NAMES[m]).join(" ");
-  const rotation = sol.crossColor !== undefined ? CROSS_COLOR_ROTATION[sol.crossColor] : "";
+  const baseRotation = sol.rotation ?? (sol.crossColor !== undefined ? CROSS_COLOR_ROTATION[sol.crossColor] : "");
+  let moveStr: string;
+  let rotation: string;
+  if (useRw && sol.dColor !== undefined) {
+    const { moves: rwMoves, rotationSuffix } = convertToRw(sol.moves);
+    moveStr = rwMoves;
+    rotation = simplifyRotation((baseRotation + rotationSuffix).trim());
+  } else {
+    moveStr = sol.moves.map((m) => MOVE_NAMES[m]).join(" ");
+    rotation = baseRotation;
+  }
   const fullStr = rotation ? `${rotation} ${moveStr}` : moveStr;
+  const isFB = sol.dColor !== undefined;
   return (
     <div
       onClick={onSelect}
@@ -144,13 +174,18 @@ function SolutionRow({
       <span className={`w-4 text-right shrink-0 text-xs ${sol.isOptimal || isGlobalOptimal ? "text-success font-bold" : "text-muted"}`}>
         {sol.length}
       </span>
-      {sol.crossColor !== undefined && (
+      {isFB ? (
+        <span className="flex gap-px shrink-0" title={`D:${CROSS_COLOR_NAMES[sol.dColor!]} L:${CROSS_COLOR_NAMES[sol.lColor!]}`}>
+          <span className="inline-block w-3 h-3 border border-black/20" style={{ backgroundColor: COLOR_CSS[sol.dColor!] }} />
+          <span className="inline-block w-3 h-3 border border-black/20" style={{ backgroundColor: COLOR_CSS[sol.lColor!] }} />
+        </span>
+      ) : sol.crossColor !== undefined ? (
         <span
           className="inline-block w-3 h-3 shrink-0 border border-black/20"
           style={{ backgroundColor: COLOR_CSS[sol.crossColor] }}
           title={CROSS_COLOR_NAMES[sol.crossColor]}
         />
-      )}
+      ) : null}
       {slotLabel && (
         <span className="text-muted text-xs shrink-0">{slotLabel}</span>
       )}

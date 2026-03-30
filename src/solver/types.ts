@@ -38,7 +38,7 @@ export const SLOT_NAMES = ["FR", "FL", "BL", "BR"];
 export type SlotPair = [Slot, Slot];
 
 // Solver type
-export const SolverType = { Cross: 0, XCross: 1, XXCross: 2 } as const;
+export const SolverType = { Cross: 0, XCross: 1, XXCross: 2, FB: 3 } as const;
 export type SolverType = (typeof SolverType)[keyof typeof SolverType];
 
 // Cross color (which face to solve cross on)
@@ -55,11 +55,12 @@ export type CrossColor = (typeof CrossColor)[keyof typeof CrossColor];
 export const CROSS_COLOR_NAMES = ["W", "Y", "G", "B", "R", "O"];
 
 // Rotation prefix for each cross color (scramble is White=U, Green=F)
+// Physical rotations: x = CW from right (U→B→D→F), z = CW from front (U→R→D→L)
 export const CROSS_COLOR_ROTATION: string[] = [
-  "x2",  // White: U→D
+  "x2",  // White: U↔D (self-inverse)
   "",     // Yellow: already D
-  "x",   // Green: F→D
-  "x'",  // Blue: B→D
+  "x'",  // Green: F→D (forward tilt)
+  "x",   // Blue: B→D (backward tilt)
   "z",   // Red: R→D
   "z'",  // Orange: L→D
 ];
@@ -76,10 +77,55 @@ export interface PairInfo {
 export interface Solution {
   moves: Move[];
   crossColor?: CrossColor;
+  dColor?: CrossColor;    // FB: bottom face color
+  lColor?: CrossColor;    // FB: left face color
   length: number;
   slot?: Slot;
   slotPair?: SlotPair;
   isOptimal: boolean;
+  rotation?: string;      // explicit rotation prefix (overrides crossColor-based)
+  goalIdx?: number;       // FB: which L-layer goal was reached (0=home, 1=L, 2=L2, 3=L')
+}
+
+// ============================================================
+// FB (Roux First Block) helpers
+// ============================================================
+
+// CrossColor → standard face position (which face has this color in solved state)
+// Face indices: U=0, D=1, R=2, L=3, F=4, B=5
+export const COLOR_STANDARD_FACE: number[] = [
+  0, // White  → U
+  1, // Yellow → D
+  4, // Green  → F
+  5, // Blue   → B
+  2, // Red    → R
+  3, // Orange → L
+];
+
+// Face position → CrossColor (which color is on this face in solved state)
+export const FACE_STANDARD_COLOR: CrossColor[] = [
+  0, // U → White
+  1, // D → Yellow
+  4, // R → Red
+  5, // L → Orange
+  2, // F → Green
+  3, // B → Blue
+];
+
+// Opposite cross colors (same axis)
+export const OPPOSITE_COLOR: Record<number, CrossColor> = {
+  [CrossColor.White]:  CrossColor.Yellow,
+  [CrossColor.Yellow]: CrossColor.White,
+  [CrossColor.Green]:  CrossColor.Blue,
+  [CrossColor.Blue]:   CrossColor.Green,
+  [CrossColor.Red]:    CrossColor.Orange,
+  [CrossColor.Orange]: CrossColor.Red,
+};
+
+/** Get valid L face colors for a given D face color. */
+export function getFBLOptions(dColor: CrossColor): CrossColor[] {
+  const opposite = OPPOSITE_COLOR[dColor];
+  return ([0, 1, 2, 3, 4, 5] as CrossColor[]).filter(c => c !== dColor && c !== opposite);
 }
 
 // Solver configuration

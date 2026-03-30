@@ -10,12 +10,16 @@ import {
   generateCrossCornerPruningTable,
   generateCrossEdgePruningTable,
 } from "./pruning";
+import { generateFBEdgeMoveTable, generateFBCornerMoveTable, generateFBPruningTable } from "./fb-coords";
+import { simplifyRotation } from "@/lib/notation";
 import { solveCross } from "./cross-solver";
 import { solveXCross, solveAllXCross } from "./xcross-solver";
+import { solveFB } from "./fb-solver";
 import { detectPairs, areSlotsAdjacent } from "./pair";
 import { NUM_CORNERS, NUM_EDGES } from "./constants";
 import {
   Solution, SolverType, Slot, CrossColor, Move, MOVE_COUNT, PairInfo,
+  COLOR_STANDARD_FACE, CROSS_COLOR_ROTATION, FACE_STANDARD_COLOR,
 } from "./types";
 
 export function initMoveTables(): void {
@@ -31,6 +35,15 @@ export function initCrossPruningTable(): void {
 export function initXCrossPruningTables(cornerPiece: number, edgePiece: number): void {
   generateCrossCornerPruningTable(cornerPiece);
   generateCrossEdgePruningTable(edgePiece);
+}
+
+export function initFBTables(): void {
+  generateFBEdgeMoveTable();
+  generateFBCornerMoveTable();
+}
+
+export function initFBPruningTable(): void {
+  generateFBPruningTable();
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +97,118 @@ const REMAP_FOR_Z = buildRemapTable([2, 3, 1, 0, 4, 5]);
 // z' (CCW around F axis): U->L->D->R->U, F=F, B=B
 const REMAP_FOR_Z_PRIME = buildRemapTable([3, 2, 0, 1, 4, 5]);
 
+// ---------------------------------------------------------------------------
+// Y-rotation remaps (for FB L-face selection)
+// ---------------------------------------------------------------------------
+// y:  F->R->B->L->F  (CW from above)
+// y': F->L->B->R->F  (CCW from above)
+// y2: F->B, R->L
+
+// Face-level maps for cross-color rotations (needed for FB composition)
+const CROSS_COLOR_FACE_MAP: Record<number, number[]> = {
+  [CrossColor.White]:  [1, 0, 2, 3, 5, 4],   // x2
+  [CrossColor.Yellow]: [0, 1, 2, 3, 4, 5],   // identity
+  [CrossColor.Green]:  [4, 5, 2, 3, 1, 0],   // x
+  [CrossColor.Blue]:   [5, 4, 2, 3, 0, 1],   // x'
+  [CrossColor.Red]:    [2, 3, 1, 0, 4, 5],   // z
+  [CrossColor.Orange]: [3, 2, 0, 1, 4, 5],   // z'
+};
+
+// Y-rotation face maps keyed by current position of L-target face.
+// Standard cubing: y = CW from above = F→L→B→R→F (same direction as U move)
+// y brings F to L. y' brings B to L.
+const Y_FACE_MAP: Record<number, number[]> = {
+  3: [0, 1, 2, 3, 4, 5],   // already at L → identity
+  4: [0, 1, 4, 5, 3, 2],   // at F → y  (F→L)
+  2: [0, 1, 3, 2, 5, 4],   // at R → y2
+  5: [0, 1, 5, 4, 2, 3],   // at B → y' (B→L)
+};
+
+const Y_ROTATION_STRING: Record<number, string> = {
+  3: "",     // identity
+  4: "y",    // y  (F→L)
+  2: "y2",   // y2
+  5: "y'",   // y' (B→L)
+};
+
+/**
+ * Build combined remap for FB solving: cross-color rotation + y-rotation.
+ * Returns the 18-move forward remap, its inverse, and the rotation display string.
+ */
+function getFBRemap(dColor: CrossColor, lColor: CrossColor): {
+  fwdRemap: Move[];
+  invRemap: Move[];
+  rotString: string;
+} {
+  const crossFaceMap = CROSS_COLOR_FACE_MAP[dColor];
+
+  // Find where the target L color ended up after cross-color rotation
+  const lOriginalFace = COLOR_STANDARD_FACE[lColor];
+  const lCurrentPos = crossFaceMap[lOriginalFace];
+
+  const yFaceMap = Y_FACE_MAP[lCurrentPos];
+  if (!yFaceMap) {
+    throw new Error(`Invalid FB position: D=${dColor}, L=${lColor}`);
+  }
+
+  // Compose: first cross rotation, then y rotation
+  const combinedFaceMap = crossFaceMap.map(f => yFaceMap[f]);
+  const fwdRemap = buildRemapTable(combinedFaceMap);
+  const inv = invertRemap(fwdRemap);
+
+  const crossRot = CROSS_COLOR_ROTATION[dColor];
+  const yRot = Y_ROTATION_STRING[lCurrentPos];
+  const rotString = simplifyRotation([crossRot, yRot].filter(Boolean).join(" "));
+
+  return { fwdRemap, invRemap: inv, rotString };
+}
+
+interface FBGoalInfo {
+  rotation: string;
+  moveRemap: Move[] | null; // null if no remap needed (home goal)
+}
+
+/**
+ * For each of the 4 FB goals, compute:
+ * - rotation: the display rotation prefix for that goal's physical orientation
+ * - moveRemap: table to convert solution moves from solving frame to display frame
+ */
+function computeFBGoalInfo(dColor: CrossColor, lColor: CrossColor, solvingRemap: Move[]): FBGoalInfo[] {
+  const crossFaceMap = CROSS_COLOR_FACE_MAP[dColor];
+  const lPos = crossFaceMap[COLOR_STANDARD_FACE[lColor]];
+  const yFaceMap = Y_FACE_MAP[lPos]!;
+  const combined = crossFaceMap.map((f: number) => yFaceMap[f]);
+
+  // Inverse of combined face map: invMap[solvingFace] = originalFace
+  const invMap: number[] = new Array(6);
+  for (let i = 0; i < 6; i++) invMap[combined[i]] = i;
+
+  // L^k moves D stickers to these solving-frame faces:
+  // k=0: D(1), k=1(L): B(5), k=2(L2): U(0), k=3(L'): F(4)
+  const targetFaces = [1, 5, 0, 4];
+  const invSolvingRemap = invertRemap(solvingRemap);
+
+  const goalInfos: FBGoalInfo[] = [];
+  for (const tf of targetFaces) {
+    const physDColor = FACE_STANDARD_COLOR[invMap[tf]];
+    const { fwdRemap: displayRemap, rotString } = getFBRemap(physDColor, lColor);
+
+    // Convert moves from solving frame to display frame:
+    // physMove = invSolvingRemap[solvingMove], displayMove = displayRemap[physMove]
+    let moveRemap: Move[] | null = null;
+    if (tf !== 1) { // not home goal — needs remap
+      moveRemap = new Array(MOVE_COUNT);
+      for (let m = 0; m < MOVE_COUNT; m++) {
+        moveRemap[m] = displayRemap[invSolvingRemap[m]];
+      }
+    }
+
+    goalInfos.push({ rotation: rotString, moveRemap });
+  }
+
+  return goalInfos;
+}
+
 /** Get the forward remap table for a given cross color. */
 function getRemapForColor(color: CrossColor): Move[] {
   switch (color) {
@@ -118,6 +243,7 @@ export function solve(
   maxExtraDepth: number,
   crossColor: CrossColor = CrossColor.White,
   pairInfos?: PairInfo[],
+  lColor?: CrossColor,
 ): Solution[] {
   const rawMoves = parseScramble(scramble);
 
@@ -163,6 +289,28 @@ export function solve(
     } else {
       results = solveAllXCross(state, slots, maxExtraDepth);
     }
+  } else if (solverType === SolverType.FB && lColor !== undefined) {
+    const { fwdRemap: fbFwd } = getFBRemap(crossColor, lColor);
+    const fbRemappedMoves = remapMoves(rawMoves, fbFwd);
+    const fbState = createSolvedState();
+    applyMoves(fbState, fbRemappedMoves);
+
+    // For each goal (4 L-layer positions), compute the display rotation
+    // and a move remap to convert solution moves from the solving frame
+    // to the display frame.
+    const goalInfo = computeFBGoalInfo(crossColor, lColor, fbFwd);
+
+    results = solveFB(fbState, maxExtraDepth);
+    for (const sol of results) {
+      const gi = goalInfo[sol.goalIdx ?? 0];
+      sol.dColor = crossColor;
+      sol.lColor = lColor;
+      sol.rotation = gi.rotation;
+      if (gi.moveRemap) {
+        sol.moves = sol.moves.map(m => gi.moveRemap![m]);
+      }
+    }
+    return results;
   } else {
     return [];
   }

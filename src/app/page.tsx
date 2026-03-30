@@ -7,7 +7,8 @@ import SolveControls from "@/components/SolveControls";
 import SolutionList from "@/components/SolutionList";
 import InitProgress from "@/components/InitProgress";
 import { useSolver } from "@/hooks/useSolver";
-import { SolverType, Slot, CrossColor, PairInfo, MOVE_NAMES, CROSS_COLOR_ROTATION, SLOT_NAMES } from "@/solver/types";
+import { SolverType, Slot, CrossColor, PairInfo, MOVE_NAMES, CROSS_COLOR_ROTATION, SLOT_NAMES, getFBLOptions } from "@/solver/types";
+import { convertToRw, simplifyRotation } from "@/lib/notation";
 
 const CubeViewer = dynamic(() => import("@/components/CubeViewer"), { ssr: false });
 
@@ -21,6 +22,8 @@ export default function Home() {
   const [maxExtraDepth, setMaxExtraDepth] = useState(2);
   const [selectedSolutionIndex, setSelectedSolutionIndex] = useState<number | null>(null);
   const [preservePair, setPreservePair] = useState(false);
+  const [fbLColors, setFBLColors] = useState<CrossColor[]>(() => getFBLOptions(CrossColor.White));
+  const [useRw, setUseRw] = useState(false);
 
   // Detect pairs when scramble or cross colors change
   const detectedPairs = useMemo(() => {
@@ -33,6 +36,18 @@ export default function Home() {
     if (detectedPairs.length === 0) setPreservePair(false);
   }, [detectedPairs]);
 
+  // Update FB L colors when D colors change (remove invalid combinations)
+  useEffect(() => {
+    const validOptions = new Set<CrossColor>();
+    for (const dc of crossColors) {
+      for (const lc of getFBLOptions(dc)) validOptions.add(lc);
+    }
+    setFBLColors(prev => {
+      const filtered = prev.filter(c => validOptions.has(c));
+      return filtered.length > 0 ? filtered : Array.from(validOptions);
+    });
+  }, [crossColors]);
+
   const handleGenerate = useCallback(() => {
     const { generateScramble } = require("@/lib/scramble");
     setScramble(generateScramble());
@@ -43,20 +58,28 @@ export default function Home() {
   const handleSolve = useCallback(() => {
     if (!scramble.trim()) return;
     setSelectedSolutionIndex(null);
-    const pairsToUse = preservePair && detectedPairs.length > 0 ? detectedPairs : undefined;
-    const slotsToSolve = pairsToUse
-      ? [...new Set(pairsToUse.map((p) => p.slot))]
-      : selectedSlots;
-    solve(scramble, solverType, slotsToSolve, maxExtraDepth, crossColors, pairsToUse);
-  }, [scramble, solverType, selectedSlots, maxExtraDepth, crossColors, solve, preservePair, detectedPairs]);
+    if (solverType === SolverType.FB) {
+      solve(scramble, solverType, [], maxExtraDepth, crossColors, undefined, fbLColors);
+    } else {
+      const pairsToUse = preservePair && detectedPairs.length > 0 ? detectedPairs : undefined;
+      const slotsToSolve = pairsToUse
+        ? [...new Set(pairsToUse.map((p) => p.slot))]
+        : selectedSlots;
+      solve(scramble, solverType, slotsToSolve, maxExtraDepth, crossColors, pairsToUse);
+    }
+  }, [scramble, solverType, selectedSlots, maxExtraDepth, crossColors, solve, preservePair, detectedPairs, fbLColors]);
 
   const selectedSolution = selectedSolutionIndex !== null ? solutions[selectedSolutionIndex] : null;
-  const solutionAlg = selectedSolution
-    ? [
-        selectedSolution.crossColor !== undefined ? CROSS_COLOR_ROTATION[selectedSolution.crossColor] : "",
-        selectedSolution.moves.map((m) => MOVE_NAMES[m]).join(" "),
-      ].filter(Boolean).join(" ")
-    : "";
+  const solutionAlg = (() => {
+    if (!selectedSolution) return "";
+    const baseRot = selectedSolution.rotation ?? (selectedSolution.crossColor !== undefined ? CROSS_COLOR_ROTATION[selectedSolution.crossColor] : "");
+    if (useRw && selectedSolution.dColor !== undefined) {
+      const { moves: rwMoves, rotationSuffix } = convertToRw(selectedSolution.moves);
+      const rot = simplifyRotation((baseRot + rotationSuffix).trim());
+      return [rot, rwMoves].filter(Boolean).join(" ");
+    }
+    return [baseRot, selectedSolution.moves.map((m) => MOVE_NAMES[m]).join(" ")].filter(Boolean).join(" ");
+  })();
 
   return (
     <main className="flex-1 p-2 md:p-4 max-w-5xl mx-auto w-full">
@@ -65,7 +88,7 @@ export default function Home() {
       )}
 
       <div className="flex items-center justify-between mb-2">
-        <div className="font-mono font-bold text-sm">xcross solver</div>
+        <div className="font-mono font-bold text-sm">xcross / fb solver</div>
       </div>
 
       <ScrambleInput
@@ -96,11 +119,16 @@ export default function Home() {
             preservePair={preservePair}
             onPreservePairChange={setPreservePair}
             detectedPairs={detectedPairs}
+            fbLColors={fbLColors}
+            onFBLColorsChange={setFBLColors}
+            useRw={useRw}
+            onUseRwChange={setUseRw}
           />
           <SolutionList
             solutions={solutions}
             selectedIndex={selectedSolutionIndex}
             onSelect={setSelectedSolutionIndex}
+            useRw={useRw}
           />
         </div>
       </div>
